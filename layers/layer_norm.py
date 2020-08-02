@@ -3,10 +3,12 @@ import tensorflow as tf
 
 class LayerNormalization(tf.keras.layers.Layer):
 
-    def __init__(self, hidden_size, axis=[-1]):
+    def __init__(self, hidden_size, axis=[-2, -1], learnable=True):
         super(LayerNormalization, self).__init__()
         self.hidden_size = hidden_size
         self.axis = axis
+        self.learnable = learnable
+
     def build(self, input_shape):
         self.gamma = self.add_weight(
             "layer_norm_scale",
@@ -26,11 +28,16 @@ class LayerNormalization(tf.keras.layers.Layer):
         mean = tf.reduce_mean(x, axis=self.axis, keepdims=True)
         variance = tf.reduce_mean(tf.square(x - mean), axis=self.axis, keepdims=True)
         normalized = (x - mean) * tf.math.rsqrt(variance + epsilon)
-        return tf.cast(normalized * self.gamma + self.beta, input_dtype)
+        if self.learnable:
+            return tf.cast(normalized * self.gamma + self.beta, input_dtype)
+
+        if not self.learnable:
+            return tf.cast(normalized, input_dtype)
+
 
 class InstanceNormalization(LayerNormalization):
-    def __init__(self, hidden_size):
-        super(InstanceNormalization, self).__init__(hidden_size, axis=[-2])
+    def __init__(self, hidden_size, learnable=True):
+        super(InstanceNormalization, self).__init__(hidden_size, axis=[-2], learnable=learnable)
 
     # def call(self, x, epsilon=1e-6, input_dtype=tf.float32):
     #     print('norm', tf.shape(x))
