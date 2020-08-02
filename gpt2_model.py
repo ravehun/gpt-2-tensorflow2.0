@@ -38,7 +38,7 @@ class Gpt2(tf.keras.Model):
         self.pos_embedding = PositionEmbeddingLayer(
             self.max_seq_len, self.d_model)
 
-        self.instance_norm = InstanceNormalization(self.dense_feature_dim)
+        self.instance_norm = InstanceNormalization(self.dense_feature_dim, learnable=False)
 
         self.decoder_layers = [DecoderLayer(self.d_model, self.num_heads, self.dff)
                                for _ in range(self.num_layers)]
