@@ -91,8 +91,7 @@ class Gpt2(tf.keras.Model):
 
         return logits, presents
 
-    @staticmethod
-    def get_padded_accuracy(labels, logits):
+    def get_padded_accuracy(self, labels, logits):
         with tf.name_scope("padded_accuracy"):
             labels = tf.squeeze(labels, -1)
             weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
@@ -101,7 +100,7 @@ class Gpt2(tf.keras.Model):
             padded_labels = tf.cast(labels, tf.int32)
 
             nonpad_seq = tf.math.count_nonzero(weights, dtype=tf.dtypes.float32, )
-            acc = tf.cast(tf.equal(outputs, padded_labels), tf.float32)
+            acc = tf.cast(self.accuracy_object(outputs, padded_labels), tf.float32)
 
             accuracy = tf.reduce_sum(tf.cast(acc * weights, tf.float32)) / nonpad_seq
             return tf.cast(accuracy, tf.float32)
