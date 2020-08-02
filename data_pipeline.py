@@ -34,20 +34,37 @@ def convert_ids_to_tokens(inv_vocab, ids):
 
 def parse_example(serialized_example):
     data_fields = {
-        "inputs": tf.io.VarLenFeature(tf.int64),
-        "targets": tf.io.VarLenFeature(tf.int64)
+        'targets': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
+        'open_f': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
+        'high_f': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
+        'low_f': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
+        'close_f': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
+        'volume_f': tf.io.FixedLenSequenceFeature([],tf.float32, allow_missing=True, default_value=0.0),
     }
     parsed = tf.io.parse_single_example(serialized_example, data_fields)
-    inputs = tf.sparse.to_dense(parsed["inputs"])
-    targets = tf.sparse.to_dense(parsed["targets"])
 
-    inputs = tf.cast(inputs, tf.int32)
-    targets = tf.cast(targets, tf.int32)
+    targets = tf.cast(parsed['targets'], tf.float32)
+    open_f = tf.cast(parsed['open_f'], tf.float32)
+    high_f = tf.cast(parsed['high_f'], tf.float32)
+    low_f = tf.cast(parsed['low_f'], tf.float32)
+    close_f = tf.cast(parsed['close_f'], tf.float32)
+    volume_f = tf.cast(parsed['volume_f'], tf.float32)
 
+    inputs = tf.stack(
+        [
+            open_f,
+            high_f,
+            low_f,
+            close_f,
+            volume_f,
+        ],
+        axis=-1
+    )
+    targets = tf.expand_dims(targets,-1)
     return inputs, targets
 
 
-def input_fn(tf_records, batch_size=32, padded_shapes=([-1], [-1]), epoch=10, buffer_size=10000):
+def input_fn(tf_records, batch_size=32, padded_shapes=([-1,-1,], [-1,-1,]), epoch=10, buffer_size=10000):
     if type(tf_records) is str:
         tf_records = [tf_records]
     dataset = tf.data.TFRecordDataset(tf_records, buffer_size=10000)

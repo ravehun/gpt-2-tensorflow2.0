@@ -1,9 +1,8 @@
 from layers.feed_forward import *
 from layers.attention_layer import *
 from layers.embedding_layer import *
-from layers.layer_norm import LayerNormalization
+from layers.layer_norm import LayerNormalization, InstanceNormalization
 from tensorflow.python.framework import tensor_shape
-
 from utils.tf_utils import *
 import os
 
@@ -11,15 +10,15 @@ _ROOT = os.path.abspath(os.path.dirname(__file__))
 LOG_DIR = _ROOT + "/log"
 
 train_step_signature = [
-    tf.TensorSpec(shape=(None, None), dtype=tf.int32, name="Inputs"),
-    tf.TensorSpec(shape=(None, None), dtype=tf.int32, name="Targets"),
+    tf.TensorSpec(shape=(None, None, None), dtype=tf.float32, name="Inputs"),
+    tf.TensorSpec(shape=(None, None, None), dtype=tf.float32, name="Targets"),
     tf.TensorSpec(shape=(None), dtype=tf.int32, name="Step")
 ]
 
 
 class Gpt2(tf.keras.Model):
-    def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, vocab_size,
-                 optimizer="adam", learning_rate=1e-3, rev_embedding_projection=True):
+    def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, dense_feature_dim,
+                 optimizer="adam", learning_rate=1e-3, rev_embedding_projection=False):
         super(Gpt2, self).__init__()
 
         self.rev_embedding_projection = rev_embedding_projection
@@ -27,38 +26,41 @@ class Gpt2(tf.keras.Model):
         self.num_heads = num_heads
         self.dff = dff
         self.max_seq_len = max_seq_len
-        self.vocab_size = vocab_size
+        self.dense_feature_dim = dense_feature_dim
         self.d_model = d_model
         self.learning_rate = learning_rate
         self.optimizer_t = optimizer
         self.dataset = None
         self.mirrored_strategy = None
 
-        self.embedding = EmbeddingLayer(
-            self.vocab_size, self.d_model)
+        self.input_projection = Conv1d(5, d_model)
 
         self.pos_embedding = PositionEmbeddingLayer(
             self.max_seq_len, self.d_model)
+
+        self.instance_norm = InstanceNormalization(self.dense_feature_dim)
 
         self.decoder_layers = [DecoderLayer(self.d_model, self.num_heads, self.dff)
                                for _ in range(self.num_layers)]
         self.layer_norm = LayerNormalization(self.d_model)
 
         if not self.rev_embedding_projection:
-            self.output_layer = OutputLayer(self.vocab_size)
+            self.output_layer = OutputLayer(1)
 
-        self.loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
-            from_logits=True, reduction='none')
+        # self.loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
+        #     from_logits=True, reduction='none')
 
-        self.accuracy_object = tf.keras.metrics.SparseCategoricalAccuracy(
+        self.loss_object = tf.keras.losses.MeanSquaredLogarithmicError(reduction='none')
+
+        self.accuracy_object = tf.keras.metrics.MeanAbsolutePercentageError(
             name='accuracy')
 
         self.train_step_signature = [
             tf.TensorSpec(shape=(None, None), dtype=tf.int32)]
 
     def call(self, x, training=True, past=None):
-        x = tf.cast(x, tf.int32)
-        batch, sequence = tf.shape(x)[0], tf.shape(x)[1]
+        # x = tf.cast(x, tf.int32)
+        batch, sequence, dim = tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2]
         if past is None:
             pasts = [None] * self.num_layers
         else:
@@ -66,11 +68,14 @@ class Gpt2(tf.keras.Model):
 
         assert len(pasts) == self.num_layers
 
-        att_mask = create_masks(x)
+        att_mask = create_masks(x[..., 1])
         past_length = 1 if past is None else tf.shape(past)[-2]
+
+        x = self.instance_norm(x)
+
         with tf.name_scope("embeddings"):
-            embedded_x = self.embedding(x)
-            hidden_states = embedded_x + self.pos_embedding(x, start=past_length)
+            embedded_x = self.input_projection(x)
+            hidden_states = embedded_x + self.pos_embedding(x[..., -1], start=past_length)
 
         presents = []
         for decoder_layer, past in zip(self.decoder_layers, pasts):
@@ -80,7 +85,7 @@ class Gpt2(tf.keras.Model):
         hidden_states = self.layer_norm(hidden_states)
 
         if self.rev_embedding_projection:
-            logits = self.embedding(hidden_states, mode="projection")
+            logits = self.input_projection(hidden_states, mode="projection")
         else:
             logits = self.output_layer(hidden_states)
 
@@ -89,6 +94,7 @@ class Gpt2(tf.keras.Model):
     @staticmethod
     def get_padded_accuracy(labels, logits):
         with tf.name_scope("padded_accuracy"):
+            labels = tf.squeeze(labels, -1)
             weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
 
             outputs = tf.cast(tf.argmax(logits, axis=-1), tf.int32)
@@ -106,7 +112,7 @@ class Gpt2(tf.keras.Model):
             if optimizer == "adam":
                 self.optimizer = tf.keras.optimizers.Adam(self.learning_rate, beta_1=0.9, beta_2=0.98,
                                                           epsilon=1e-9)
-            elif optimizer == "adadelta":
+            elif optimizer == "adadelxxta":
                 self.optimizer = tf.keras.optimizers.Adadelta(self.learning_rate)
             elif optimizer == "rms":
                 self.optimizer = tf.keras.optimizers.RMSprop(self.learning_rate)
@@ -118,9 +124,9 @@ class Gpt2(tf.keras.Model):
         with tf.name_scope("loss_layer"):
             mask = tf.math.logical_not(tf.math.equal(real, 0))
             loss_ = self.loss_object(real, pred)
-
             with tf.name_scope("loss_masking"):
                 mask = tf.cast(mask, dtype=loss_.dtype)
+                mask = tf.squeeze(mask, -1)
                 loss_ *= mask
             loss_ = tf.reduce_sum(loss_, axis=1)
             sequence_avg_loss = loss_ / tf.reduce_sum(mask, axis=1)
@@ -158,8 +164,8 @@ class Gpt2(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             predictions, _ = self(inputs, training=True)
+            # print(targets.shape, predictions.shape)
             loss = tf.reduce_mean(self.get_loss(targets, predictions))
-
         with tf.name_scope("gradients"):
             gradients = tape.gradient(loss, self.trainable_variables)
             if grad_clip:
@@ -295,5 +301,3 @@ class DecoderLayer(tf.keras.layers.Layer):
         with tf.name_scope("residual_conn"):
             x = x + out
         return x, present
-    
-    
