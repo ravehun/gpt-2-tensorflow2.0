@@ -1,7 +1,7 @@
 from layers.feed_forward import *
 from layers.attention_layer import *
 from layers.embedding_layer import *
-from layers.layer_norm import LayerNormalization, InstanceNormalization
+from layers.layer_norm import LayerNormalization
 from tensorflow.python.framework import tensor_shape
 from utils.tf_utils import *
 import os
@@ -38,8 +38,6 @@ class Gpt2(tf.keras.Model):
         self.pos_embedding = PositionEmbeddingLayer(
             self.max_seq_len, self.d_model)
 
-        self.instance_norm = InstanceNormalization(self.dense_feature_dim, learnable=False)
-
         self.decoder_layers = [DecoderLayer(self.d_model, self.num_heads, self.dff)
                                for _ in range(self.num_layers)]
         self.layer_norm = LayerNormalization(self.d_model)
@@ -68,7 +66,6 @@ class Gpt2(tf.keras.Model):
         att_mask = create_masks(x[..., 1])
         past_length = 1 if past is None else tf.shape(past)[-2]
 
-        x = self.instance_norm(x)
 
         with tf.name_scope("embeddings"):
             embedded_x = self.input_projection(x)
