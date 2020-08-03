@@ -85,15 +85,15 @@ class Gpt2(tf.keras.Model):
 
         return logits, presents
 
-    def get_padded_accuracy(self, labels, logits):
+    def get_padded_metric(self, labels, logits):
         with tf.name_scope("padded_accuracy"):
             labels = tf.squeeze(labels, -1)
             weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
 
-            nonpad_seq = tf.math.count_nonzero(weights, dtype=tf.dtypes.float32, )
+            nonpad_seq = tf.math.count_nonzero(weights, dtype=tf.dtypes.float32, axis=1,keepdims=True)
             acc = tf.cast(self.accuracy_object(logits, labels), tf.float32)
 
-            accuracy = tf.reduce_sum(tf.cast(acc * weights, tf.float32)) / nonpad_seq
+            accuracy = tf.reduce_sum(tf.cast(acc * weights, tf.float32), axis=1, keepdims=True) / nonpad_seq
             return tf.cast(accuracy, tf.float32)
 
     def creat_optimizer(self):
@@ -163,14 +163,15 @@ class Gpt2(tf.keras.Model):
                              for grad in gradients]
             self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
-        accuracy = self.get_padded_accuracy(targets, predictions)
+
+        mean_abs_error = self.get_padded_metric(targets, predictions)
 
         with tf.name_scope("summary_writer"):
             with self.train_writer.as_default():
                 tf.summary.scalar("loss", loss, step=tf.cast(step, tf.int64))
-                tf.summary.scalar("accuracy", accuracy, step=tf.cast(step, tf.int64))
+                tf.summary.scalar("mean_abs_error", mean_abs_error, step=tf.cast(step, tf.int64))
 
-        return loss, accuracy
+        return loss, mean_abs_error
 
     @tf.function
     def distributed_train_step(self, inputs, targets, step, grad_clip=True, clip_value=1.0):
