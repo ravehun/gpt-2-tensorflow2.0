@@ -47,9 +47,6 @@ class Gpt2(tf.keras.Model):
         if not self.rev_embedding_projection:
             self.output_layer = OutputLayer(1)
 
-        # self.loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
-        #     from_logits=True, reduction='none')
-
         self.loss_object = tf.keras.losses.MeanSquaredLogarithmicError(reduction='none')
 
         self.accuracy_object = tf.keras.metrics.MeanAbsolutePercentageError(
@@ -96,11 +93,8 @@ class Gpt2(tf.keras.Model):
             labels = tf.squeeze(labels, -1)
             weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
 
-            outputs = tf.cast(tf.argmax(logits, axis=-1), tf.int32)
-            padded_labels = tf.cast(labels, tf.int32)
-
             nonpad_seq = tf.math.count_nonzero(weights, dtype=tf.dtypes.float32, )
-            acc = tf.cast(self.accuracy_object(outputs, padded_labels), tf.float32)
+            acc = tf.cast(self.accuracy_object(logits, labels), tf.float32)
 
             accuracy = tf.reduce_sum(tf.cast(acc * weights, tf.float32)) / nonpad_seq
             return tf.cast(accuracy, tf.float32)
