@@ -85,16 +85,18 @@ class Gpt2(tf.keras.Model):
 
         return logits, presents
 
-    def get_padded_metric(self, labels, logits):
+    def get_padded_metric(self, labels, logits, eps=1e-9):
         with tf.name_scope("padded_accuracy"):
             labels = tf.squeeze(labels, -1)
             weights = tf.cast(tf.not_equal(labels, 0), tf.float32)
 
-            nonpad_seq = tf.math.count_nonzero(weights, dtype=tf.dtypes.float32, axis=1,keepdims=True)
+            nonpad_seq = tf.reduce_sum(weights, axis=1,keepdims=True) + eps
             acc = tf.cast(self.accuracy_object(logits, labels), tf.float32)
 
-            accuracy = tf.reduce_sum(tf.cast(acc * weights, tf.float32), axis=1, keepdims=True) / nonpad_seq
-            return tf.cast(accuracy, tf.float32)
+            metric = tf.reduce_sum(tf.cast(acc * weights, tf.float32), axis=1, keepdims=True) / nonpad_seq
+
+            metric = tf.reduce_mean(metric)
+            return tf.cast(metric, tf.float32)
 
     def creat_optimizer(self):
         optimizer = self.optimizer_t.lower()
